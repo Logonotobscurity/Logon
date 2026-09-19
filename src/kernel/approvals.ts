@@ -1,4 +1,5 @@
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+export type ApprovalDecisionStatus = "APPROVED" | "REJECTED";
 
 export interface ApprovalRequest {
   approvalId: string;
@@ -13,7 +14,7 @@ export interface ApprovalRequest {
 export interface ApprovalDecision {
   approvalId: string;
   executionId: string;
-  status: Exclude<ApprovalStatus, "PENDING">;
+  status: ApprovalDecisionStatus;
   decidedBy: string;
   decidedAt: string;
   reason?: string;
