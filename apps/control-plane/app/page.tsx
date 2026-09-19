@@ -14,6 +14,13 @@ type ExecutionSummary = {
   pendingApprovals: number;
 };
 
+type Principal = {
+  subjectId: string;
+  tenantId: string;
+  roles: string[];
+  authentication: "TRUSTED_PROXY" | "DEV";
+};
+
 type ExecutionDetail = {
   execution: {
     executionId: string;
@@ -78,7 +85,8 @@ type ExecutionDetail = {
   } | null;
 };
 
-const publicTenant = process.env.NEXT_PUBLIC_LOGON_TENANT_ID ?? "";
+const devMode = process.env.NEXT_PUBLIC_LOGON_CONTROL_PLANE_DEV_MODE === "true";
+const publicTenant = devMode ? (process.env.NEXT_PUBLIC_LOGON_TENANT_ID ?? "") : "";
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat("en", {
@@ -111,6 +119,7 @@ function humanStatus(status: string): string {
 }
 
 export default function ControlPlanePage() {
+  const [principal, setPrincipal] = useState<Principal>();
   const [tenant, setTenant] = useState(publicTenant);
   const [tenantInput, setTenantInput] = useState(publicTenant);
   const [executions, setExecutions] = useState<ExecutionSummary[]>([]);
@@ -123,6 +132,23 @@ export default function ControlPlanePage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/me", { cache: "no-store" });
+        const body = (await response.json()) as Principal & { error?: string };
+        if (!response.ok) throw new Error(body.error ?? "Unable to resolve authenticated principal");
+        setPrincipal(body);
+        if (!devMode) {
+          setTenant(body.tenantId);
+          setTenantInput(body.tenantId);
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Unable to resolve authenticated principal");
+      }
+    })();
+
+    if (!devMode) return;
+
     const stored = window.sessionStorage.getItem("logon-control-plane-tenant");
     if (stored) {
       setTenant(stored);
@@ -131,6 +157,7 @@ export default function ControlPlanePage() {
   }, []);
 
   const headers = useMemo(() => {
+    if (!devMode) return {};
     const value = tenant.trim();
     return value ? { "x-logon-tenant-id": value } : {};
   }, [tenant]);
@@ -260,15 +287,23 @@ export default function ControlPlanePage() {
           </div>
         </div>
         <div className="top-actions">
-          <form onSubmit={selectTenant} className="tenant-form">
-            <input
-              aria-label="Tenant ID"
-              value={tenantInput}
-              onChange={(event) => setTenantInput(event.target.value)}
-              placeholder="tenant id"
-            />
-            <button type="submit">Connect</button>
-          </form>
+          {devMode ? (
+            <form onSubmit={selectTenant} className="tenant-form">
+              <input
+                aria-label="Development tenant ID"
+                value={tenantInput}
+                onChange={(event) => setTenantInput(event.target.value)}
+                placeholder="dev tenant id"
+              />
+              <button type="submit">Connect</button>
+            </form>
+          ) : (
+            <div className="principal-chip">
+              <strong>{principal?.subjectId ?? "Resolving identity…"}</strong>
+              <span>{principal?.tenantId ?? "—"}</span>
+              <span>{principal?.roles.join(" · ") ?? "—"}</span>
+            </div>
+          )}
           <span className={"connection " + (error ? "connection-off" : "connection-on")}>
             <span className="dot" />
             {error ? "API attention" : "API connected"}
@@ -303,7 +338,7 @@ export default function ControlPlanePage() {
           <strong>Control plane error.</strong>
           <span>{error}</span>
           <span className="alert-hint">
-            Check the API on :4100 and set LOGON_CONTROL_PLANE_TENANT_ID or enter the tenant above.
+            Check the Control Plane API/auth boundary; local development may use the explicit dev identity mode.
           </span>
         </div>
       )}
