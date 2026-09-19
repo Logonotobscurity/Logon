@@ -237,8 +237,7 @@ export default function ControlPlanePage() {
           },
           body: JSON.stringify({
             approvalId: pending.approvalId,
-            status,
-            decidedBy: "control-plane-operator"
+            status
           })
         }
       );
