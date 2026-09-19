@@ -37,6 +37,12 @@ export class PostgresExecutionService {
       await this.store.ensureTenant(client, request.identity.tenantId);
 
       if (options.idempotencyKey) {
+        await client.query(
+          "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [request.identity.tenantId + ":" + options.idempotencyKey]
+        );
+
+      if (options.idempotencyKey) {
         const existing = await this.store.findIdempotency(
           client,
           request.identity.tenantId,
@@ -49,8 +55,7 @@ export class PostgresExecutionService {
             );
           }
 
-          const events = await this.store.listEvents(existing.executionId);
-          const event = events.at(-1);
+          const event = await this.store.latestEvent(client, existing.executionId);
           if (!event) {
             throw new Error("Idempotent execution has no events: " + existing.executionId);
           }
