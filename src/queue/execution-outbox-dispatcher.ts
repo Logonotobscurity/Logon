@@ -11,6 +11,7 @@ export class ExecutionOutboxDispatcher {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
   private publishing = false;
+  private failureBackoffMs = 0;
 
   constructor(
     private readonly publisher: Pick<ExecutionOutboxPublisher, "publishOnce">,
@@ -69,11 +70,20 @@ export class ExecutionOutboxDispatcher {
     let nextDelay = this.pollIntervalMs;
     try {
       const result = await this.runOnce();
-      nextDelay = result.failed > 0
-        ? Math.min(this.maxBackoffMs, Math.max(this.pollIntervalMs * 2, this.pollIntervalMs))
-        : this.pollIntervalMs;
+      if (result.failed > 0) {
+        this.failureBackoffMs = this.failureBackoffMs === 0
+          ? this.pollIntervalMs * 2
+          : Math.min(this.maxBackoffMs, this.failureBackoffMs * 2);
+        nextDelay = this.failureBackoffMs;
+      } else {
+        this.failureBackoffMs = 0;
+        nextDelay = this.pollIntervalMs;
+      }
     } catch {
-      nextDelay = Math.min(this.maxBackoffMs, Math.max(this.pollIntervalMs * 2, this.pollIntervalMs));
+      this.failureBackoffMs = this.failureBackoffMs === 0
+        ? this.pollIntervalMs * 2
+        : Math.min(this.maxBackoffMs, this.failureBackoffMs * 2);
+      nextDelay = this.failureBackoffMs;
     }
 
     this.schedule(nextDelay);
