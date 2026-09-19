@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ExecutionKernel,
   assertTransition,
   canTransition,
   checkToolPermission,
@@ -55,5 +56,29 @@ describe("LOG_ON execution kernel", () => {
       permission: "crm:message",
       allowed: true
     }).allowed).toBe(true);
+  });
+
+  it("records a validated execution before work proceeds", () => {
+    const kernel = new ExecutionKernel();
+    const event = kernel.start({
+      identity: {
+        executionId: "ex-2",
+        tenantId: "tenant-a",
+        actorId: "actor-a",
+        agentId: "agent-a",
+        agentVersion: "0.1.0"
+      },
+      objective: "Create an audit",
+      context: {},
+      policySet: ["baseline"],
+      requestedTools: [],
+      requiresApproval: false,
+      evidenceRequired: true,
+      createdAt: new Date().toISOString()
+    });
+
+    expect(event.status).toBe("INTAKE");
+    expect(kernel.events.latestStatus("ex-2")).toBe("INTAKE");
+    expect(kernel.audit.listByExecution("ex-2")).toHaveLength(1);
   });
 });
