@@ -102,10 +102,29 @@ jobs:
       - name: Integration tests
         run: npm run test:integration -- --reporter=verbose
 
+  frontend:
+    name: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build kernel package
+        run: npm run build
+      - name: Build control plane
+        run: npm run build:control-plane
+
   ci-gate:
     name: ci-gate
     if: ${{ always() }}
-    needs: [runner-smoke, unit, integration]
+    needs: [runner-smoke, unit, integration, frontend]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -114,13 +133,16 @@ jobs:
           RUNNER_SMOKE_RESULT: ${{ needs.runner-smoke.result }}
           UNIT_RESULT: ${{ needs.unit.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
         run: |
           set -euxo pipefail
           echo "runner-smoke=$RUNNER_SMOKE_RESULT"
           echo "unit=$UNIT_RESULT"
           echo "integration=$INTEGRATION_RESULT"
+          echo "frontend=$FRONTEND_RESULT"
 
           test "$RUNNER_SMOKE_RESULT" = "success"
           test "$UNIT_RESULT" = "success"
           test "$INTEGRATION_RESULT" = "success"
+          test "$FRONTEND_RESULT" = "success"
           echo "CI gate passed"
