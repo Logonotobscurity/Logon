@@ -42,7 +42,6 @@ export class PostgresExecutionService {
           [request.identity.tenantId + ":" + options.idempotencyKey]
         );
 
-      if (options.idempotencyKey) {
         const existing = await this.store.findIdempotency(
           client,
           request.identity.tenantId,
@@ -62,6 +61,7 @@ export class PostgresExecutionService {
           return { event, reused: true };
         }
       }
+
 
       const status: ExecutionStatus = decision.allowed ? "INTAKE" : "REJECTED";
       await this.store.createExecution(client, request, status);
