@@ -7,10 +7,55 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  runner-smoke:
+    name: runner-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Runner started
+        run: |
+          set -euxo pipefail
+          echo "runner started"
+          echo "runner=$${RUNNER_NAME}"
+          echo "os=$${RUNNER_OS}"
+      - name: Runtime versions
+        run: |
+          set -euxo pipefail
+          node --version
+          npm --version
+
+  unit:
+    name: unit
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Environment
+        run: |
+          set -euxo pipefail
+          node --version
+          npm --version
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test -- --reporter=verbose
+
+  integration:
+    name: integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -44,16 +89,40 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: Environment
         run: |
           set -euxo pipefail
           node --version
           npm --version
+          echo "postgres host=localhost port=5432"
+          echo "redis host=127.0.0.1 port=6379 db=0"
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
-      - name: Unit tests
-        run: npm test -- --reporter=verbose
       - name: Integration tests
         run: npm run test:integration -- --reporter=verbose
+
+  ci-gate:
+    name: ci-gate
+    if: ${{ always() }}
+    needs: [runner-smoke, unit, integration]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate required jobs
+        env:
+          RUNNER_SMOKE_RESULT: ${{ needs.runner-smoke.result }}
+          UNIT_RESULT: ${{ needs.unit.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+        run: |
+          set -euxo pipefail
+          echo "runner-smoke=$RUNNER_SMOKE_RESULT"
+          echo "unit=$UNIT_RESULT"
+          echo "integration=$INTEGRATION_RESULT"
+
+          test "$RUNNER_SMOKE_RESULT" = "success"
+          test "$UNIT_RESULT" = "success"
+          test "$INTEGRATION_RESULT" = "success"
+          echo "CI gate passed"
