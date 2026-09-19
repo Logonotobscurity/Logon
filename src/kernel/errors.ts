@@ -22,6 +22,16 @@ export class ApprovalExpiredError extends LogonError {
   }
 }
 
+export class ApprovalExecutionMismatchError extends LogonError {
+  constructor(approvalId: string, executionId: string) {
+    super(
+      "APPROVAL_EXECUTION_MISMATCH",
+      "Approval " + approvalId + " is not bound to execution " + executionId
+    );
+    this.name = "ApprovalExecutionMismatchError";
+  }
+}
+
 export class ApprovalNotPendingError extends LogonError {
   constructor(approvalId: string) {
     super("APPROVAL_NOT_PENDING", "Approval is not pending: " + approvalId);
