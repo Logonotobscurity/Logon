@@ -3,6 +3,7 @@ import type { AuditRecord, ExecutionEvent, ExecutionRequest } from "./types.js";
 import type { ApprovalDecision, ApprovalRequest, ApprovalStatus } from "./approvals.js";
 import {
   ApprovalExpiredError,
+  ApprovalExecutionMismatchError,
   ApprovalNotFoundError,
   ApprovalNotPendingError,
   ExecutionNotFoundError
@@ -133,11 +134,18 @@ export class PgExecutionStore implements PostgresExecutionStore {
 
   async decideApproval(client: DbClient, decision: ApprovalDecision): Promise<ApprovalStatus> {
     const current = await client.query(
-      "select status, expires_at from logon_approvals where approval_id = $1 for update",
+      "select a.status, a.expires_at, a.execution_id, a.tenant_id, e.tenant_id as execution_tenant_id " +
+        "from logon_approvals a " +
+        "join logon_executions e on e.execution_id = a.execution_id " +
+        "where a.approval_id = $1 for update of a",
       [decision.approvalId]
     );
     const row = current.rows[0];
     if (!row) throw new ApprovalNotFoundError(decision.approvalId);
+    if (String(row.execution_id) !== decision.executionId ||
+        String(row.tenant_id) !== String(row.execution_tenant_id)) {
+      throw new ApprovalExecutionMismatchError(decision.approvalId, decision.executionId);
+    }
     if (String(row.status) !== "PENDING") {
       throw new ApprovalNotPendingError(decision.approvalId);
     }
@@ -162,12 +170,13 @@ export class PgExecutionStore implements PostgresExecutionStore {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const result = await client.query(
       "with candidates as (" +
-        " select approval_id from logon_approvals" +
-        " where status = 'PENDING'" +
-        "   and expires_at is not null" +
-        "   and expires_at <= now()" +
-        " order by expires_at" +
-        " for update skip locked limit $1" +
+        " select a.approval_id from logon_approvals a" +
+        " join logon_executions e on e.execution_id = a.execution_id" +
+        " where a.status = 'PENDING'" +
+        "   and a.expires_at is not null" +
+        "   and a.expires_at <= now()" +
+        " order by a.expires_at" +
+        " for update of e skip locked limit $1" +
         ") " +
         "update logon_approvals a" +
         " set status = 'EXPIRED'," +
