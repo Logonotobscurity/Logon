@@ -20,8 +20,6 @@ jobs:
         run: |
           set -euxo pipefail
           echo "runner started"
-          echo "runner=\${RUNNER_NAME}"
-          echo "os=\${RUNNER_OS}"
       - name: Runtime versions
         run: |
           set -euxo pipefail
