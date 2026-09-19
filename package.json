@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run tests/integration",
-    "build": "tsc"
+    "build": "tsc",
+    "start:runtime": "node --import ./dist/observability/instrumentation.js ./dist/runtime/main.js"
   },
   "dependencies": {
     "zod": "^3.25.76",
