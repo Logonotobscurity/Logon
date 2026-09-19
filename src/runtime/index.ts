@@ -6,3 +6,4 @@ export * from "../queue/execution-outbox-publisher.js";
 export * from "../queue/execution-outbox-dispatcher.js";
 export * from "./execution-runtime.js";
 export * from "./controlled-execution-handler.js";
+export * from "./approval-expiry-sweeper.js";

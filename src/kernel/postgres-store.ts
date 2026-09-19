@@ -1,6 +1,12 @@
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 import type { AuditRecord, ExecutionEvent, ExecutionRequest } from "./types.js";
 import type { ApprovalDecision, ApprovalRequest, ApprovalStatus } from "./approvals.js";
+import {
+  ApprovalExpiredError,
+  ApprovalNotFoundError,
+  ApprovalNotPendingError,
+  ExecutionNotFoundError
+} from "./errors.js";
 
 type DbClient = Pick<PoolClient, "query">;
 
@@ -15,6 +21,12 @@ export interface DispatchClaim {
   attempts: number;
 }
 
+export interface ExpiredApprovalClaim {
+  approvalId: string;
+  executionId: string;
+  tenantId: string;
+}
+
 export interface PostgresExecutionStore {
   withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T>;
   ensureTenant(client: DbClient, tenantId: string): Promise<void>;
@@ -22,6 +34,7 @@ export interface PostgresExecutionStore {
   createApproval(client: DbClient, request: ApprovalRequest): Promise<void>;
   getApproval(client: DbClient, executionId: string): Promise<{ approvalId: string; status: ApprovalStatus; expiresAt?: string } | undefined>;
   decideApproval(client: DbClient, decision: ApprovalDecision): Promise<ApprovalStatus>;
+  claimExpiredApprovals(client: DbClient, limit: number): Promise<ExpiredApprovalClaim[]>;
   claimDispatches(client: DbClient, limit: number, leaseMs: number): Promise<DispatchClaim[]>;
   markDispatchSucceeded(client: DbClient, executionId: string): Promise<void>;
   markDispatchFailed(client: DbClient, executionId: string, error: string): Promise<void>;
@@ -124,16 +137,17 @@ export class PgExecutionStore implements PostgresExecutionStore {
       [decision.approvalId]
     );
     const row = current.rows[0];
-    if (!row) throw new Error("Approval not found: " + decision.approvalId);
+    if (!row) throw new ApprovalNotFoundError(decision.approvalId);
     if (String(row.status) !== "PENDING") {
-      throw new Error("Approval is not pending: " + decision.approvalId);
+      throw new ApprovalNotPendingError(decision.approvalId);
     }
     if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
       await client.query(
-        "update logon_approvals set status = 'EXPIRED' where approval_id = $1",
-        [decision.approvalId]
+        "update logon_approvals set status = 'EXPIRED', decided_at = now(), decided_by = $2 " +
+          "where approval_id = $1",
+        [decision.approvalId, "logon.approval.expiry"]
       );
-      throw new Error("Approval has expired: " + decision.approvalId);
+      throw new ApprovalExpiredError(decision.approvalId);
     }
 
     await client.query(
@@ -142,6 +156,34 @@ export class PgExecutionStore implements PostgresExecutionStore {
       [decision.approvalId, decision.status, decision.decidedBy, decision.decidedAt]
     );
     return decision.status;
+  }
+
+  async claimExpiredApprovals(client: DbClient, limit: number): Promise<ExpiredApprovalClaim[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const result = await client.query(
+      "with candidates as (" +
+        " select approval_id from logon_approvals" +
+        " where status = 'PENDING'" +
+        "   and expires_at is not null" +
+        "   and expires_at <= now()" +
+        " order by expires_at" +
+        " for update skip locked limit $1" +
+        ") " +
+        "update logon_approvals a" +
+        " set status = 'EXPIRED'," +
+        "     decided_by = 'logon.approval.expiry'," +
+        "     decided_at = now()" +
+        " from candidates c" +
+        " where a.approval_id = c.approval_id" +
+        " returning a.approval_id, a.execution_id, a.tenant_id",
+      [safeLimit]
+    );
+
+    return result.rows.map((row) => ({
+      approvalId: String(row.approval_id),
+      executionId: String(row.execution_id),
+      tenantId: String(row.tenant_id)
+    }));
   }
 
   async createDispatch(client: DbClient, executionId: string, queueName: string): Promise<void> {
@@ -254,7 +296,7 @@ export class PgExecutionStore implements PostgresExecutionStore {
       [executionId]
     );
     if (result.rowCount !== 1) {
-      throw new Error("Execution not found: " + executionId);
+      throw new ExecutionNotFoundError(executionId);
     }
     return asStatus(String(asRowObject(result.rows[0]).status));
   }

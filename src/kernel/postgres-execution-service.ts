@@ -7,6 +7,11 @@ import type { ApprovalDecision } from "./approvals.js";
 import type { ExecutionEvent, ExecutionRequest, ExecutionStatus } from "./types.js";
 import { evaluateExecutionPolicy } from "./policy.js";
 import { PgExecutionStore } from "./postgres-store.js";
+import {
+  ApprovalExpiredError,
+  IdempotencyConflictError,
+  InvalidExecutionTransitionError
+} from "./errors.js";
 
 export interface StartExecutionOptions {
   idempotencyKey?: string;
@@ -16,6 +21,14 @@ export interface StartExecutionResult {
   event: ExecutionEvent;
   reused: boolean;
 }
+
+export interface ExpireApprovalsResult {
+  claimed: number;
+  rejected: number;
+  skipped: number;
+}
+
+const DEFAULT_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 
 export class PostgresExecutionService {
   readonly store: PgExecutionStore;
@@ -50,9 +63,7 @@ export class PostgresExecutionService {
         );
         if (existing) {
           if (existing.requestHash !== requestHash) {
-            throw new Error(
-              "Idempotency key reuse with a different request: " + options.idempotencyKey
-            );
+            throw new IdempotencyConflictError(options.idempotencyKey);
           }
 
           const event = await this.store.latestEvent(client, existing.executionId);
@@ -88,13 +99,15 @@ export class PostgresExecutionService {
       const stored = await this.store.appendEvent(client, event, 1);
 
       if (decision.allowed && decision.requiresApproval) {
+        const expiresAt = new Date(Date.now() + DEFAULT_APPROVAL_TTL_MS).toISOString();
         await this.store.createApproval(client, {
           approvalId: randomUUID(),
           executionId: request.identity.executionId,
           tenantId: request.identity.tenantId,
           requestedBy: request.identity.actorId,
           reason: decision.reason,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          expiresAt
         });
       } else if (decision.allowed) {
         await this.store.createDispatch(client, request.identity.executionId, "logon.execution");
@@ -119,6 +132,26 @@ export class PostgresExecutionService {
           request.identity.executionId,
           requestHash
         );
+
+        // Post-insert check: another writer under the same key must match this hash.
+        const recorded = await this.store.findIdempotency(
+          client,
+          request.identity.tenantId,
+          options.idempotencyKey
+        );
+        if (!recorded) {
+          throw new Error("Idempotency record missing after insert: " + options.idempotencyKey);
+        }
+        if (recorded.requestHash !== requestHash) {
+          throw new IdempotencyConflictError(options.idempotencyKey);
+        }
+        if (recorded.executionId !== request.identity.executionId) {
+          const event = await this.store.latestEvent(client, recorded.executionId);
+          if (!event) {
+            throw new Error("Idempotent execution has no events: " + recorded.executionId);
+          }
+          return { event, reused: true };
+        }
       }
 
       return { event: stored, reused: false };
@@ -138,15 +171,29 @@ export class PostgresExecutionService {
         );
       }
 
-      const approvalStatus = await this.store.decideApproval(client, decision);
+      let approvalStatus;
+      try {
+        approvalStatus = await this.store.decideApproval(client, decision);
+      } catch (error) {
+        if (error instanceof ApprovalExpiredError) {
+          // Align execution with expired approval in the same transaction.
+          await this.rejectExpiredExecution(
+            client,
+            decision.executionId,
+            decision.approvalId,
+            "logon.approval.expiry"
+          );
+        }
+        throw error;
+      }
+
       const nextStatus: ExecutionStatus =
         approvalStatus === "APPROVED" ? "EXECUTION" : "REJECTED";
 
-      if (approvalStatus === "APPROVED" || approvalStatus === "REJECTED") {
+      try {
         assertTransition(current, nextStatus);
-      } else {
-        // EXPIRED is handled inside store.decideApproval by throwing
-        throw new Error("Unsupported approval decision status: " + approvalStatus);
+      } catch {
+        throw new InvalidExecutionTransitionError(current, nextStatus);
       }
 
       const sequenceResult = await client.query(
@@ -197,6 +244,84 @@ export class PostgresExecutionService {
     });
   }
 
+  /**
+   * Marks expired PENDING approvals and rejects still-waiting executions.
+   * Safe under concurrent sweepers via FOR UPDATE SKIP LOCKED.
+   */
+  async expireApprovalsOnce(limit = 50): Promise<ExpireApprovalsResult> {
+    return this.store.withTransaction(async (client) => {
+      const claims = await this.store.claimExpiredApprovals(client, limit);
+      let rejected = 0;
+      let skipped = 0;
+
+      for (const claim of claims) {
+        const status = await this.store.lockExecution(client, claim.executionId);
+        if (status !== "APPROVAL") {
+          skipped += 1;
+          continue;
+        }
+
+        await this.rejectExpiredExecution(
+          client,
+          claim.executionId,
+          claim.approvalId,
+          "logon.approval.expiry"
+        );
+        rejected += 1;
+      }
+
+      return { claimed: claims.length, rejected, skipped };
+    });
+  }
+
+  private async rejectExpiredExecution(
+    client: import("pg").PoolClient,
+    executionId: string,
+    approvalId: string,
+    actorId: string
+  ): Promise<void> {
+    const sequenceResult = await client.query(
+      "select coalesce(max(sequence), 0) as sequence from logon_execution_events where execution_id = $1",
+      [executionId]
+    );
+    const sequence = Number(sequenceResult.rows[0].sequence) + 1;
+    const now = new Date().toISOString();
+
+    await client.query(
+      "update logon_executions set status = 'REJECTED', updated_at = now() where execution_id = $1",
+      [executionId]
+    );
+
+    await this.store.appendEvent(
+      client,
+      {
+        executionId,
+        status: "REJECTED",
+        type: "EXECUTION_REJECTED",
+        timestamp: now,
+        actorId,
+        payload: {
+          approvalId,
+          approvalStatus: "EXPIRED",
+          reason: "Approval expired"
+        }
+      },
+      sequence
+    );
+
+    const tenantId = await this.lookupTenant(client, executionId);
+    await this.store.appendAudit(client, {
+      auditId: randomUUID(),
+      executionId,
+      tenantId,
+      action: "EXECUTION_APPROVAL_EXPIRED",
+      actorId,
+      allowed: false,
+      reason: "Approval expired",
+      createdAt: now
+    });
+  }
+
   private async lookupTenant(
     client: import("pg").PoolClient,
     executionId: string
@@ -218,7 +343,11 @@ export class PostgresExecutionService {
   ): Promise<ExecutionEvent> {
     return this.store.withTransaction(async (client) => {
       const current = await this.store.lockExecution(client, executionId);
-      assertTransition(current, status);
+      try {
+        assertTransition(current, status);
+      } catch {
+        throw new InvalidExecutionTransitionError(current, status);
+      }
 
       const event: Omit<ExecutionEvent, "sequence"> = {
         executionId,
