@@ -45,9 +45,15 @@ The first slice exposes:
 
 Returns service health after a PostgreSQL connectivity check.
 
+### GET /api/me
+
+Requires an authenticated Control Plane principal.
+
+Returns the subject, tenant, roles, and authentication mode used for the current request.
+
 ### GET /api/executions
 
-Requires x-logon-tenant-id.
+Requires an authenticated Control Plane principal.
 
 Returns up to 100 executions belonging to that tenant, ordered by most recently updated.
 
@@ -67,7 +73,6 @@ Body:
 {
   "approvalId": "approval-id",
   "status": "APPROVED",
-  "decidedBy": "operator-id",
   "reason": "optional"
 }
 ~~~
@@ -85,11 +90,28 @@ Client state is cache/projection only:
 - treat POST approval responses as acknowledgements, then reload from the PostgreSQL-backed projection
 - never mark an action complete solely because a browser request returned 200
 
-## Tenant isolation
+## Identity and RBAC
 
-The first slice intentionally requires an explicit tenant identifier. Authentication/identity federation is not implemented yet.
+Tenant scope is derived from a Control Plane principal at the API boundary.
 
-Production deployment must replace the client-supplied tenant header with a trusted identity/session boundary. The API must derive tenant scope from the authenticated principal and ignore arbitrary browser-supplied tenant identifiers.
+Production mode requires LOGON_CONTROL_PLANE_TRUSTED_PROXY=true. The trusted edge must authenticate the user, strip any incoming x-logon-auth-* headers, and inject:
+
+- x-logon-auth-subject
+- x-logon-auth-tenant
+- x-logon-auth-roles
+
+The API treats these claims as trusted only behind that configured boundary.
+
+Local development can set LOGON_CONTROL_PLANE_DEV_MODE=true. In that mode explicit development headers/environment values are accepted. This mode must never be enabled on a public deployment.
+
+Roles currently defined:
+
+- VIEWER: read-only Control Plane access.
+- OPERATOR: operational/read access.
+- APPROVER: read access plus human approval decisions.
+- ADMIN: full first-slice Control Plane access including approvals.
+
+The approval endpoint deliberately ignores any browser-supplied decidedBy value and records the authenticated principal subject as the decision actor.
 
 ## Local development
 
@@ -104,8 +126,7 @@ The browser can also persist a tenant ID for the local session through the tenan
 
 ## Deliberate non-goals in this slice
 
-- authentication / SSO
-- RBAC and role provisioning
+- SSO provider integration / role provisioning
 - real-time WebSocket/SSE transport
 - agent-plan editing
 - direct tool execution from the browser
@@ -113,3 +134,8 @@ The browser can also persist a tenant ID for the local session through the tenan
 - evaluation dashboards beyond durable event/proof visibility
 
 These belong in subsequent Control Plane slices and must continue to use kernel contracts instead of creating browser-owned business rules.
+
+
+## Security status
+
+Authentication provider integration is not complete in this slice. The API now has a fail-closed principal resolver and RBAC boundary, with a trusted-proxy contract for production deployment and an explicit dev-only fallback for local testing.
