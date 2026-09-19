@@ -1,4 +1,4 @@
-import { Job, Worker, type WorkerOptions } from "bullmq";
+import { Worker, type Job, type WorkerOptions } from "bullmq";
 import type { ExecutionJobData, ExecutionJobResult } from "./execution-queue.js";
 import { EXECUTION_QUEUE_NAME } from "./execution-queue.js";
 import { redisWorkerConnectionFromEnv } from "./redis-connection.js";
