@@ -14,10 +14,7 @@ export interface ModelResponse {
   provider: string;
   model: string;
   output: unknown;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-  };
+  usage?: { inputTokens?: number; outputTokens?: number };
   requestId?: string;
 }
 
