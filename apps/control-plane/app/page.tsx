@@ -52,6 +52,13 @@ type ExecutionDetail = {
     payloadHash: string;
     createdAt: string;
   }>;
+  permissions: Array<{
+    agentId: string;
+    toolId: string;
+    permission: string;
+    allowed: boolean;
+    expiresAt?: string;
+  }>;
   audit: Array<{
     auditId: string;
     action: string;
@@ -405,6 +412,49 @@ export default function ControlPlanePage() {
                   </div>
                 </section>
               )}
+
+              <section className="panel contract-panel">
+                <div className="panel-head">
+                  <div>
+                    <div className="eyebrow">AGENT CONTRACT</div>
+                    <h3>Policy, tools & permissions</h3>
+                  </div>
+                  <span className="muted">{detail.permissions.length} configured</span>
+                </div>
+                <div className="contract-grid">
+                  <div>
+                    <div className="proof-label">Requested tools</div>
+                    <div className="tag-row">
+                      {Array.isArray(detail.execution.request.requestedTools) && detail.execution.request.requestedTools.length
+                        ? detail.execution.request.requestedTools.map((tool) => (
+                            <span className="tag" key={String(tool)}>{String(tool)}</span>
+                          ))
+                        : <span className="empty-inline">None declared.</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="proof-label">Policy set</div>
+                    <div className="tag-row">
+                      {Array.isArray(detail.execution.request.policySet) && detail.execution.request.policySet.length
+                        ? detail.execution.request.policySet.map((policy) => (
+                            <span className="tag tag-dark" key={String(policy)}>{String(policy)}</span>
+                          ))
+                        : <span className="empty-inline">None declared.</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="permission-table">
+                  {detail.permissions.map((item) => (
+                    <div className="permission-row" key={item.toolId + item.permission}>
+                      <span className={item.allowed ? "perm-allowed" : "perm-denied"}>{item.allowed ? "ALLOWED" : "DENIED"}</span>
+                      <strong>{item.toolId}</strong>
+                      <span>{item.permission}</span>
+                      <span>{item.expiresAt ? "expires " + formatTime(item.expiresAt) : "no expiry"}</span>
+                    </div>
+                  ))}
+                  {!detail.permissions.length && <div className="empty-inline">No tenant-level tool permission records are configured for this agent.</div>}
+                </div>
+              </section>
 
               <div className="two-col">
                 <section className="panel">
