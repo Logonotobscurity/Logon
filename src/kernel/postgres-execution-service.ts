@@ -83,6 +83,10 @@ export class PostgresExecutionService {
 
       const stored = await this.store.appendEvent(client, event, 1);
 
+      if (decision.allowed) {
+        await this.store.createDispatch(client, request.identity.executionId, "logon.execution");
+      }
+
       await this.store.appendAudit(client, {
         auditId: randomUUID(),
         executionId: request.identity.executionId,
