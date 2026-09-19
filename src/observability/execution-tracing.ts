@@ -7,7 +7,7 @@ import {
 const tracer = trace.getTracer("@log_on/os-kernel");
 
 export interface ExecutionTraceAttributes {
-  tenantId: string;
+  tenantId?: string;
   executionId: string;
   agentId?: string;
   agentVersion?: string;
@@ -21,9 +21,10 @@ export async function withExecutionSpan<T>(
 ): Promise<T> {
   return tracer.startActiveSpan(name, async (span) => {
     const spanAttributes: Record<string, AttributeValue> = {
-      "logon.tenant_id": attributes.tenantId,
       "logon.execution_id": attributes.executionId
     };
+
+    if (attributes.tenantId) spanAttributes["logon.tenant_id"] = attributes.tenantId;
 
     if (attributes.agentId) spanAttributes["logon.agent_id"] = attributes.agentId;
     if (attributes.agentVersion) spanAttributes["logon.agent_version"] = attributes.agentVersion;
