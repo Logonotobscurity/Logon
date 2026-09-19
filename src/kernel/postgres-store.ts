@@ -27,6 +27,7 @@ export interface PostgresExecutionStore {
     executionId: string,
     requestHash: string
   ): Promise<void>;
+  latestEvent(client: DbClient, executionId: string): Promise<ExecutionEvent | undefined>;
   listEvents(executionId: string, limit?: number): Promise<ExecutionEvent[]>;
 }
 
@@ -173,6 +174,25 @@ export class PgExecutionStore implements PostgresExecutionStore {
         "on conflict (tenant_id, idempotency_key) do nothing",
       [tenantId, key, executionId, requestHash]
     );
+  }
+
+  async latestEvent(client: DbClient, executionId: string): Promise<ExecutionEvent | undefined> {
+    const result = await client.query(
+      "select execution_id, sequence, status, event_type, actor_id, payload_json, created_at " +
+        "from logon_execution_events where execution_id = $1 order by sequence desc limit 1",
+      [executionId]
+    );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return {
+      executionId: String(row.execution_id),
+      sequence: Number(row.sequence),
+      status: asStatus(String(row.status)),
+      type: String(row.event_type),
+      timestamp: new Date(row.created_at).toISOString(),
+      actorId: String(row.actor_id),
+      payload: (row.payload_json ?? {}) as Record<string, unknown>
+    };
   }
 
   async listEvents(executionId: string, limit = 100): Promise<ExecutionEvent[]> {
