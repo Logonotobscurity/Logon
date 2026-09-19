@@ -1,20 +1,26 @@
-import { Pool } from "pg";
-import { PostgresExecutionService } from "../kernel/postgres-execution-service.js";
-import { createControlledExecutionHandler } from "./controlled-execution-handler.js";
+import { join } from "node:path";
+import { createSemanticExecutionHandler } from "../agent/semantic-execution-handler.js";
+import { applyMigrations } from "../db/migrate.js";
+import { createLogonPool } from "../db/pool.js";
 import { ExecutionRuntime } from "./execution-runtime.js";
 
-function requireDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const url = env.LOGON_DATABASE_URL ?? env.DATABASE_URL;
-  if (!url || !url.trim()) {
-    throw new Error("LOGON_DATABASE_URL or DATABASE_URL is required to start the execution runtime");
-  }
-  return url;
-}
-
 async function main(): Promise<void> {
-  const pool = new Pool({ connectionString: requireDatabaseUrl() });
-  const service = new PostgresExecutionService(pool);
-  const runtime = new ExecutionRuntime(pool, createControlledExecutionHandler(service));
+  const pool = createLogonPool();
+  const migrationsDir = join(process.cwd(), "db", "migrations");
+
+  const migrationResult = await applyMigrations(pool, migrationsDir);
+  console.error(
+    "[logon-runtime] migrations applied=" +
+      migrationResult.applied.length +
+      " skipped=" +
+      migrationResult.alreadyApplied.length
+  );
+
+  const runtime = new ExecutionRuntime(pool, createSemanticExecutionHandler(
+    // ExecutionRuntime constructs its own service; pass a dedicated one for the handler.
+    // Re-use the same pool so both share connections.
+    new (await import("../kernel/postgres-execution-service.js")).PostgresExecutionService(pool)
+  ));
 
   let stopping = false;
   const shutdown = async (signal: string): Promise<void> => {
@@ -40,7 +46,7 @@ async function main(): Promise<void> {
   });
 
   runtime.start();
-  console.error("[logon-runtime] execution runtime started (dispatcher + worker)");
+  console.error("[logon-runtime] semantic agent runtime started (dispatcher + worker + approval sweeper)");
 }
 
 main().catch((error) => {

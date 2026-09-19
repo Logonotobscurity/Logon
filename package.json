@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:integration": "vitest run tests/integration",
     "build": "tsc",
+    "migrate": "node ./dist/db/migrate-cli.js",
     "dev:control-plane": "npm --workspace @log_on/control-plane run dev",
     "build:control-plane": "npm --workspace @log_on/control-plane run build",
     "start:control-plane": "npm --workspace @log_on/control-plane run start",
