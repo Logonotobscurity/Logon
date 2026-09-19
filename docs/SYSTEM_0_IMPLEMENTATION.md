@@ -23,13 +23,17 @@ The domain tests still use in-memory stores, while the repository now includes a
 3. Deterministic request hashing and tenant-scoped idempotency are implemented.
 4. PostgreSQL status/evidence/approval constraints are defined in a follow-up migration.
 
+## Production progress
+5. BullMQ execution queue and worker adapters are implemented; jobs carry execution IDs only.
+6. OpenTelemetry Node instrumentation and execution-worker spans are implemented.
+7. A transactional execution outbox protects the PostgreSQL-to-Redis handoff.
+
 ## Next production slice
-1. BullMQ worker integration behind PostgresExecutionService.
-2. OpenTelemetry trace/span propagation.
-3. Model gateway adapter(s).
-4. Approval repository and approval enforcement on high-impact transitions.
-5. Durable secret/config management.
-6. PostgreSQL integration tests in CI with a service container.
+1. Connect the worker handler to the full semantic execution pipeline and PostgresExecutionService.
+2. Approval repository and approval enforcement on high-impact transitions.
+3. Durable secret/config management.
+4. PostgreSQL + Redis integration tests in CI with service containers.
+5. Model gateway provider adapters.
 
 ## Non-regression invariants
 - A registered tool does not grant permission.
