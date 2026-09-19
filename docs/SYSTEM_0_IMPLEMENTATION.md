@@ -15,17 +15,21 @@ This slice turns the LOG_ON kernel specification into executable TypeScript cont
 - unit tests for core invariants
 
 ## Deliberate boundary
-The current implementation uses in-memory stores. PostgreSQL, Redis/BullMQ, OpenTelemetry and LangGraph are integration layers behind these contracts rather than domain logic.
+The domain tests still use in-memory stores, while the repository now includes a PostgreSQL runtime adapter and transactional execution service. PostgreSQL, Redis/BullMQ, OpenTelemetry and LangGraph remain integration layers behind the domain contracts rather than domain logic.
+
+## Production progress
+1. PostgreSQL execution/event/audit/idempotency persistence is implemented.
+2. Transactional start, transition and failure paths are implemented with execution-row locking.
+3. Deterministic request hashing and tenant-scoped idempotency are implemented.
+4. PostgreSQL status/evidence/approval constraints are defined in a follow-up migration.
 
 ## Next production slice
-1. PostgreSQL repositories for executions, events, permissions, tools, evidence and audit records.
-2. Transactional event writes and tenant-scoped queries.
-3. BullMQ worker integration.
-4. OpenTelemetry trace/span propagation.
-5. Model gateway interface.
-6. Approval records and idempotency keys.
-7. Durable secret/config management.
-8. PostgreSQL integration tests.
+1. BullMQ worker integration behind PostgresExecutionService.
+2. OpenTelemetry trace/span propagation.
+3. Model gateway adapter(s).
+4. Approval repository and approval enforcement on high-impact transitions.
+5. Durable secret/config management.
+6. PostgreSQL integration tests in CI with a service container.
 
 ## Non-regression invariants
 - A registered tool does not grant permission.
