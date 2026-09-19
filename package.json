@@ -23,6 +23,7 @@
     "dev:control-plane": "npm --workspace @log_on/control-plane run dev",
     "build:control-plane": "npm --workspace @log_on/control-plane run build",
     "start:control-plane": "npm --workspace @log_on/control-plane run start",
+    "start:control-plane-api": "node ./dist/control-plane/main.js",
     "start:runtime": "node --import ./dist/observability/instrumentation.js ./dist/runtime/main.js"
   },
   "dependencies": {
