@@ -71,9 +71,7 @@ describe("controlled execution handler", () => {
     let latest: ExecutionEvent = event("INTAKE");
     const transition = vi.fn(async () => {
       latest = event("CONTEXT");
-      const error = new Error("race");
-      Object.setPrototypeOf(error, InvalidExecutionTransitionError.prototype);
-      throw error;
+      throw new InvalidExecutionTransitionError("INTAKE", "CONTEXT");
     });
     const service = {
       store: {
