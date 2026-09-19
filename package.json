@@ -4,11 +4,25 @@
   "private": true,
   "description": "Shared execution kernel for LOG_ON AI operating systems.",
   "type": "module",
+  "main": "./dist/kernel/index.js",
+  "types": "./src/kernel/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/kernel/index.ts",
+      "import": "./dist/kernel/index.js"
+    }
+  },
+  "workspaces": [
+    "apps/control-plane"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run tests/integration",
     "build": "tsc",
+    "dev:control-plane": "npm --workspace @log_on/control-plane run dev",
+    "build:control-plane": "npm --workspace @log_on/control-plane run build",
+    "start:control-plane": "npm --workspace @log_on/control-plane run start",
     "start:runtime": "node --import ./dist/observability/instrumentation.js ./dist/runtime/main.js"
   },
   "dependencies": {
