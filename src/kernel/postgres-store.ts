@@ -1,5 +1,6 @@
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 import type { AuditRecord, ExecutionEvent, ExecutionRequest } from "./types.js";
+import type { ApprovalDecision, ApprovalRequest, ApprovalStatus } from "./approvals.js";
 
 type DbClient = Pick<PoolClient, "query">;
 
@@ -18,6 +19,9 @@ export interface PostgresExecutionStore {
   withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T>;
   ensureTenant(client: DbClient, tenantId: string): Promise<void>;
   createDispatch(client: DbClient, executionId: string, queueName: string): Promise<void>;
+  createApproval(client: DbClient, request: ApprovalRequest): Promise<void>;
+  getApproval(client: DbClient, executionId: string): Promise<{ approvalId: string; status: ApprovalStatus; expiresAt?: string } | undefined>;
+  decideApproval(client: DbClient, decision: ApprovalDecision): Promise<ApprovalStatus>;
   claimDispatches(client: DbClient, limit: number, leaseMs: number): Promise<DispatchClaim[]>;
   markDispatchSucceeded(client: DbClient, executionId: string): Promise<void>;
   markDispatchFailed(client: DbClient, executionId: string, error: string): Promise<void>;
@@ -76,6 +80,68 @@ export class PgExecutionStore implements PostgresExecutionStore {
       "insert into logon_tenants (tenant_id) values ($1) on conflict (tenant_id) do nothing",
       [tenantId]
     );
+  }
+
+  async createApproval(client: DbClient, request: ApprovalRequest): Promise<void> {
+    await client.query(
+      "insert into logon_approvals " +
+        "(approval_id, execution_id, tenant_id, requested_by, status, reason, expires_at, created_at) " +
+        "values ($1,$2,$3,$4,'PENDING',$5,$6::timestamptz,$7::timestamptz) " +
+        "on conflict (approval_id) do nothing",
+      [
+        request.approvalId,
+        request.executionId,
+        request.tenantId,
+        request.requestedBy,
+        request.reason,
+        request.expiresAt ?? null,
+        request.createdAt
+      ]
+    );
+  }
+
+  async getApproval(
+    client: DbClient,
+    executionId: string
+  ): Promise<{ approvalId: string; status: ApprovalStatus; expiresAt?: string } | undefined> {
+    const result = await client.query(
+      "select approval_id, status, expires_at from logon_approvals " +
+        "where execution_id = $1 order by created_at desc limit 1",
+      [executionId]
+    );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return {
+      approvalId: String(row.approval_id),
+      status: String(row.status) as ApprovalStatus,
+      ...(row.expires_at ? { expiresAt: new Date(row.expires_at).toISOString() } : {})
+    };
+  }
+
+  async decideApproval(client: DbClient, decision: ApprovalDecision): Promise<ApprovalStatus> {
+    const current = await client.query(
+      "select status, expires_at from logon_approvals where approval_id = $1 for update",
+      [decision.approvalId]
+    );
+    const row = current.rows[0];
+    if (!row) throw new Error("Approval not found: " + decision.approvalId);
+    if (String(row.status) !== "PENDING") {
+      throw new Error("Approval is not pending: " + decision.approvalId);
+    }
+    if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
+      await client.query(
+        "update logon_approvals set status = 'EXPIRED' where approval_id = $1",
+        [decision.approvalId]
+      );
+      throw new Error("Approval has expired: " + decision.approvalId);
+    }
+
+    await client.query(
+      "update logon_approvals set status = $2, decided_by = $3, decided_at = $4::timestamptz " +
+        "where approval_id = $1",
+      [decision.approvalId, decision.status, decision.decidedBy, decision.decidedAt]
+    );
+    return decision.status;
   }
 
   async createDispatch(client: DbClient, executionId: string, queueName: string): Promise<void> {
