@@ -13,3 +13,4 @@ export * from "./types.js";
 export * from "./canonical-json.js";
 export * from "./postgres-store.js";
 export * from "./postgres-execution-service.js";
+export * from "./errors.js";

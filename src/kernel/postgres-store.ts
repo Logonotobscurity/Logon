@@ -1,5 +1,13 @@
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 import type { AuditRecord, ExecutionEvent, ExecutionRequest } from "./types.js";
+import type { ApprovalDecision, ApprovalRequest, ApprovalStatus } from "./approvals.js";
+import {
+  ApprovalExpiredError,
+  ApprovalExecutionMismatchError,
+  ApprovalNotFoundError,
+  ApprovalNotPendingError,
+  ExecutionNotFoundError
+} from "./errors.js";
 
 type DbClient = Pick<PoolClient, "query">;
 
@@ -14,10 +22,20 @@ export interface DispatchClaim {
   attempts: number;
 }
 
+export interface ExpiredApprovalClaim {
+  approvalId: string;
+  executionId: string;
+  tenantId: string;
+}
+
 export interface PostgresExecutionStore {
   withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T>;
   ensureTenant(client: DbClient, tenantId: string): Promise<void>;
   createDispatch(client: DbClient, executionId: string, queueName: string): Promise<void>;
+  createApproval(client: DbClient, request: ApprovalRequest): Promise<void>;
+  getApproval(client: DbClient, executionId: string): Promise<{ approvalId: string; status: ApprovalStatus; expiresAt?: string } | undefined>;
+  decideApproval(client: DbClient, decision: ApprovalDecision): Promise<ApprovalStatus>;
+  claimExpiredApprovals(client: DbClient, limit: number): Promise<ExpiredApprovalClaim[]>;
   claimDispatches(client: DbClient, limit: number, leaseMs: number): Promise<DispatchClaim[]>;
   markDispatchSucceeded(client: DbClient, executionId: string): Promise<void>;
   markDispatchFailed(client: DbClient, executionId: string, error: string): Promise<void>;
@@ -76,6 +94,105 @@ export class PgExecutionStore implements PostgresExecutionStore {
       "insert into logon_tenants (tenant_id) values ($1) on conflict (tenant_id) do nothing",
       [tenantId]
     );
+  }
+
+  async createApproval(client: DbClient, request: ApprovalRequest): Promise<void> {
+    await client.query(
+      "insert into logon_approvals " +
+        "(approval_id, execution_id, tenant_id, requested_by, status, reason, expires_at, created_at) " +
+        "values ($1,$2,$3,$4,'PENDING',$5,$6::timestamptz,$7::timestamptz) " +
+        "on conflict (approval_id) do nothing",
+      [
+        request.approvalId,
+        request.executionId,
+        request.tenantId,
+        request.requestedBy,
+        request.reason,
+        request.expiresAt ?? null,
+        request.createdAt
+      ]
+    );
+  }
+
+  async getApproval(
+    client: DbClient,
+    executionId: string
+  ): Promise<{ approvalId: string; status: ApprovalStatus; expiresAt?: string } | undefined> {
+    const result = await client.query(
+      "select approval_id, status, expires_at from logon_approvals " +
+        "where execution_id = $1 order by created_at desc limit 1",
+      [executionId]
+    );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return {
+      approvalId: String(row.approval_id),
+      status: String(row.status) as ApprovalStatus,
+      ...(row.expires_at ? { expiresAt: new Date(row.expires_at).toISOString() } : {})
+    };
+  }
+
+  async decideApproval(client: DbClient, decision: ApprovalDecision): Promise<ApprovalStatus> {
+    const current = await client.query(
+      "select a.status, a.expires_at, a.execution_id, a.tenant_id, e.tenant_id as execution_tenant_id " +
+        "from logon_approvals a " +
+        "join logon_executions e on e.execution_id = a.execution_id " +
+        "where a.approval_id = $1 for update of a",
+      [decision.approvalId]
+    );
+    const row = current.rows[0];
+    if (!row) throw new ApprovalNotFoundError(decision.approvalId);
+    if (String(row.execution_id) !== decision.executionId ||
+        String(row.tenant_id) !== String(row.execution_tenant_id)) {
+      throw new ApprovalExecutionMismatchError(decision.approvalId, decision.executionId);
+    }
+    if (String(row.status) !== "PENDING") {
+      throw new ApprovalNotPendingError(decision.approvalId);
+    }
+    if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
+      await client.query(
+        "update logon_approvals set status = 'EXPIRED', decided_at = now(), decided_by = $2 " +
+          "where approval_id = $1",
+        [decision.approvalId, "logon.approval.expiry"]
+      );
+      throw new ApprovalExpiredError(decision.approvalId);
+    }
+
+    await client.query(
+      "update logon_approvals set status = $2, decided_by = $3, decided_at = $4::timestamptz " +
+        "where approval_id = $1",
+      [decision.approvalId, decision.status, decision.decidedBy, decision.decidedAt]
+    );
+    return decision.status;
+  }
+
+  async claimExpiredApprovals(client: DbClient, limit: number): Promise<ExpiredApprovalClaim[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const result = await client.query(
+      "with candidates as (" +
+        " select a.approval_id from logon_approvals a" +
+        " join logon_executions e on e.execution_id = a.execution_id" +
+        " where a.status = 'PENDING'" +
+        "   and a.expires_at is not null" +
+        "   and a.expires_at <= now()" +
+        " order by a.expires_at" +
+        " for update of e skip locked limit $1" +
+        ") " +
+        "update logon_approvals a" +
+        " set status = 'EXPIRED'," +
+        "     decided_by = 'logon.approval.expiry'," +
+        "     decided_at = now()" +
+        " from candidates c" +
+        " where a.approval_id = c.approval_id" +
+        " returning a.approval_id, a.execution_id, a.tenant_id",
+      [safeLimit]
+    );
+
+    return result.rows.map((row) => ({
+      approvalId: String(row.approval_id),
+      executionId: String(row.execution_id),
+      tenantId: String(row.tenant_id)
+    }));
   }
 
   async createDispatch(client: DbClient, executionId: string, queueName: string): Promise<void> {
@@ -188,7 +305,7 @@ export class PgExecutionStore implements PostgresExecutionStore {
       [executionId]
     );
     if (result.rowCount !== 1) {
-      throw new Error("Execution not found: " + executionId);
+      throw new ExecutionNotFoundError(executionId);
     }
     return asStatus(String(asRowObject(result.rows[0]).status));
   }
