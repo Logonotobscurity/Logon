@@ -18,7 +18,8 @@ async function applyMigrations(pool: Pool): Promise<void> {
   const files = [
     "0001_kernel.sql",
     "0002_kernel_constraints.sql",
-    "0003_execution_outbox.sql"
+    "0003_execution_outbox.sql",
+    "0004_approval_expiry_index.sql"
   ];
   for (const file of files) {
     const sql = readFileSync(join(migrationsDir, file), "utf8");
