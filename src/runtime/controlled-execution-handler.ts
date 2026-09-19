@@ -1,5 +1,6 @@
 import type { PostgresExecutionService } from "../kernel/postgres-execution-service.js";
 import type { ExecutionStatus } from "../kernel/types.js";
+import { InvalidExecutionTransitionError } from "../kernel/errors.js";
 import type { ExecutionJobHandler } from "../queue/execution-worker.js";
 
 const TERMINAL_STATUSES: ReadonlySet<ExecutionStatus> = new Set([
@@ -47,10 +48,23 @@ export function createControlledExecutionHandler(
 
     // Controlled first pipeline step for the non-approval intake path.
     if (latest.status === "INTAKE") {
-      await service.transition(executionId, "CONTEXT", actorId, {
-        source: "controlled-execution-handler",
-        reason: "Worker accepted execution and advanced controlled lifecycle"
-      });
+      try {
+        await service.transition(executionId, "CONTEXT", actorId, {
+          source: "controlled-execution-handler",
+          reason: "Worker accepted execution and advanced controlled lifecycle"
+        });
+      } catch (error) {
+        if (!(error instanceof InvalidExecutionTransitionError)) {
+          throw error;
+        }
+
+        const afterRace = await service.store.withTransaction((client) =>
+          service.store.latestEvent(client, executionId)
+        );
+        if (afterRace?.status !== "CONTEXT") {
+          throw error;
+        }
+      }
       return;
     }
 
