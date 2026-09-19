@@ -49,8 +49,18 @@ OpenTelemetry is runtime instrumentation, not business logic.
 
 No worker should reconstruct or mutate authoritative execution state from Redis job data. It receives an execution ID, loads context through the application/runtime boundary, and records state transitions through PostgresExecutionService.
 
+## Verification state
+
+The integration suite now exercises:
+
+start → transactional outbox → dispatcher → BullMQ/Redis → ExecutionWorker → controlled handler → PostgreSQL state.
+
+Approval tests also verify:
+- no dispatch while approval is PENDING;
+- approval decisions cannot target another execution;
+- expired approvals persist EXPIRED + REJECTED state before the expiry error is surfaced.
+
 ## Next slice
 
-Add PostgreSQL + Redis integration tests in CI that prove:
-
-start → outbox → dispatcher → queue → controlled handler → state transition.
+After CI runner verification, the next kernel slice is the semantic execution pipeline:
+context loading → policy evaluation → planning → tool permission check → action → validation → approval/execution → evidence → outcome → evaluation → learning.
