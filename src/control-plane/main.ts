@@ -2,6 +2,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Pool } from "pg";
 import { ApprovalExpiredError } from "../kernel/errors.js";
 import { PostgresExecutionService } from "../kernel/postgres-execution-service.js";
+import {
+  AuthorizationError,
+  PrincipalResolutionError,
+  resolvePrincipal,
+  requireRole,
+  type ControlPlanePrincipal
+} from "./auth.js";
 
 const port = Number(process.env.LOGON_CONTROL_PLANE_API_PORT ?? 4100);
 const host = process.env.LOGON_CONTROL_PLANE_API_HOST ?? "127.0.0.1";
@@ -9,17 +16,6 @@ const pool = new Pool({
   connectionString: process.env.LOGON_DATABASE_URL ?? process.env.DATABASE_URL
 });
 const executionService = new PostgresExecutionService(pool);
-
-function tenantId(req: IncomingMessage): string {
-  const header = req.headers["x-logon-tenant-id"];
-  const value = Array.isArray(header) ? header[0] : header;
-  const configured = process.env.LOGON_CONTROL_PLANE_TENANT_ID;
-  const tenant = (value ?? configured ?? "").trim();
-  if (!tenant) {
-    throw new HttpError(401, "x-logon-tenant-id is required");
-  }
-  return tenant;
-}
 
 class HttpError extends Error {
   constructor(
@@ -212,10 +208,12 @@ async function getExecution(tenant: string, executionId: string): Promise<unknow
   };
 }
 
-async function decideApproval(tenant: string, executionId: string, body: Record<string, unknown>): Promise<unknown> {
+async function decideApproval(principal: ControlPlanePrincipal, executionId: string, body: Record<string, unknown>): Promise<unknown> {
+  requireRole(principal, "APPROVE");
+  const tenant = principal.tenantId;
   const approvalId = typeof body.approvalId === "string" ? body.approvalId : "";
   const status = body.status === "APPROVED" || body.status === "REJECTED" ? body.status : undefined;
-  const decidedBy = typeof body.decidedBy === "string" && body.decidedBy.trim() ? body.decidedBy : "control-plane";
+  const decidedBy = principal.subjectId;
   const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason : undefined;
 
   if (!approvalId || !status) {
@@ -263,10 +261,22 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
       return;
     }
 
-    const tenant = tenantId(req);
+    const principal = resolvePrincipal(req);
+
+    if (req.method === "GET" && pathname === "/api/me") {
+      requireRole(principal, "READ");
+      sendJson(res, 200, {
+        subjectId: principal.subjectId,
+        tenantId: principal.tenantId,
+        roles: principal.roles,
+        authentication: principal.authentication
+      });
+      return;
+    }
 
     if (req.method === "GET" && pathname === "/api/executions") {
-      sendJson(res, 200, { executions: await listExecutions(tenant) });
+      requireRole(principal, "READ");
+      sendJson(res, 200, { executions: await listExecutions(principal.tenantId) });
       return;
     }
 
@@ -277,19 +287,20 @@ async function handler(req: IncomingMessage, res: ServerResponse): Promise<void>
     }
 
     if (req.method === "GET" && pathname === `/api/executions/${encodeURIComponent(executionId)}`) {
-      sendJson(res, 200, await getExecution(tenant, executionId));
+      requireRole(principal, "READ");
+      sendJson(res, 200, await getExecution(principal.tenantId, executionId));
       return;
     }
 
     if (req.method === "POST" && pathname === `/api/executions/${encodeURIComponent(executionId)}/approval`) {
       const body = await readJson(req);
-      sendJson(res, 200, await decideApproval(tenant, executionId, body));
+      sendJson(res, 200, await decideApproval(principal, executionId, body));
       return;
     }
 
     sendJson(res, 405, { error: "Method not allowed" });
   } catch (error) {
-    if (error instanceof HttpError) {
+    if (error instanceof HttpError || error instanceof PrincipalResolutionError || error instanceof AuthorizationError) {
       sendJson(res, error.statusCode, { error: error.message });
       return;
     }
