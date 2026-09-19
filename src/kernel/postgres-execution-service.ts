@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import { assertTransition } from "./state-machine.js";
 import { canonicalJson } from "./canonical-json.js";
 import { executionRequestSchema } from "./schemas.js";
+import type { ApprovalDecision } from "./approvals.js";
 import type { ExecutionEvent, ExecutionRequest, ExecutionStatus } from "./types.js";
 import { evaluateExecutionPolicy } from "./policy.js";
 import { PgExecutionStore } from "./postgres-store.js";
@@ -63,7 +64,11 @@ export class PostgresExecutionService {
       }
 
 
-      const status: ExecutionStatus = decision.allowed ? "INTAKE" : "REJECTED";
+      const status: ExecutionStatus = !decision.allowed
+        ? "REJECTED"
+        : decision.requiresApproval
+          ? "APPROVAL"
+          : "INTAKE";
       await this.store.createExecution(client, request, status);
 
       const event: Omit<ExecutionEvent, "sequence"> = {
@@ -83,7 +88,16 @@ export class PostgresExecutionService {
 
       const stored = await this.store.appendEvent(client, event, 1);
 
-      if (decision.allowed) {
+      if (decision.allowed && decision.requiresApproval) {
+        await this.store.createApproval(client, {
+          approvalId: randomUUID(),
+          executionId: request.identity.executionId,
+          tenantId: request.identity.tenantId,
+          requestedBy: request.identity.actorId,
+          reason: decision.reason,
+          createdAt: new Date().toISOString()
+        });
+      } else if (decision.allowed) {
         await this.store.createDispatch(client, request.identity.executionId, "logon.execution");
       }
 
@@ -110,6 +124,48 @@ export class PostgresExecutionService {
 
       return { event: stored, reused: false };
     });
+  }
+
+  async decideApproval(
+    decision: ApprovalDecision
+  ): Promise<ApprovalDecision> {
+    return this.store.withTransaction(async (client) => {
+      const status = await this.store.decideApproval(client, decision);
+      const approval = await this.store.getApproval(client, decision.executionId);
+      if (!approval) {
+        throw new Error("Approval not found for execution: " + decision.executionId);
+      }
+
+      if (status === "APPROVED") {
+        await this.store.createDispatch(client, decision.executionId, "logon.execution");
+      }
+
+      await this.store.appendAudit(client, {
+        auditId: randomUUID(),
+        executionId: decision.executionId,
+        tenantId: approval ? await this.lookupTenant(client, decision.executionId) : "",
+        action: "EXECUTION_APPROVAL_DECISION",
+        actorId: decision.decidedBy,
+        allowed: status === "APPROVED",
+        reason: decision.reason ?? ("Approval " + status.toLowerCase()),
+        createdAt: decision.decidedAt
+      });
+
+      return decision;
+    });
+  }
+
+  private async lookupTenant(
+    client: import("pg").PoolClient,
+    executionId: string
+  ): Promise<string> {
+    const result = await client.query(
+      "select tenant_id from logon_executions where execution_id = $1",
+      [executionId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Execution not found: " + executionId);
+    return String(row.tenant_id);
   }
 
   async transition(
