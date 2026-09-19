@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createControlledExecutionHandler } from "../src/runtime/controlled-execution-handler.js";
 import type { PostgresExecutionService } from "../src/kernel/postgres-execution-service.js";
+import { InvalidExecutionTransitionError } from "../src/kernel/errors.js";
 import type { ExecutionEvent, ExecutionStatus } from "../src/kernel/types.js";
 
 function event(status: ExecutionStatus, executionId = "ex-1"): ExecutionEvent {
@@ -64,6 +65,28 @@ describe("controlled execution handler", () => {
 
     await handler("ex-1", {} as never);
     expect(service.transition).not.toHaveBeenCalled();
+  });
+
+  it("treats a concurrent transition to CONTEXT as successful delivery", async () => {
+    let latest: ExecutionEvent = event("INTAKE");
+    const transition = vi.fn(async () => {
+      latest = event("CONTEXT");
+      const error = new Error("race");
+      Object.setPrototypeOf(error, InvalidExecutionTransitionError.prototype);
+      throw error;
+    });
+    const service = {
+      store: {
+        withTransaction: async (work: (client: unknown) => Promise<unknown>) => work({}),
+        latestEvent: async () => latest
+      },
+      transition
+    } as unknown as PostgresExecutionService;
+
+    const handler = createControlledExecutionHandler(service);
+    await handler("ex-1", {} as never);
+
+    expect(transition).toHaveBeenCalledTimes(1);
   });
 
   it("fails when the execution is unknown", async () => {
