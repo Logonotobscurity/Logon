@@ -7,11 +7,17 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration",
+    "build": "tsc"
   },
   "dependencies": {
     "zod": "^3.25.76",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "bullmq": "^6.3.6",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/instrumentation-pg": "^0.74.0",
+    "@opentelemetry/sdk-node": "^0.222.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.1",
