@@ -11,5 +11,9 @@ export function canonicalize(value: unknown): unknown {
 }
 
 export function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalize(value));
+  const result = JSON.stringify(canonicalize(value));
+  if (result === undefined) {
+    throw new Error("Cannot canonicalize undefined JSON input");
+  }
+  return result;
 }
