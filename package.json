@@ -1,0 +1,19 @@
+{
+  "name": "@log_on/os-kernel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared execution kernel for LOG_ON AI operating systems.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
