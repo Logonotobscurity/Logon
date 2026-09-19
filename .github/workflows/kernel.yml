@@ -1,6 +1,7 @@
 name: LOG_ON Kernel CI
 
 on:
+  workflow_dispatch:
   push:
     branches: ["main", "feat/**"]
   pull_request:
@@ -9,11 +10,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run typecheck
-      - run: npm test
+      - name: Environment
+        run: |
+          set -euxo pipefail
+          node --version
+          npm --version
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test -- --reporter=verbose
