@@ -12,6 +12,7 @@ export interface ApprovalRequest {
 
 export interface ApprovalDecision {
   approvalId: string;
+  executionId: string;
   status: Exclude<ApprovalStatus, "PENDING">;
   decidedBy: string;
   decidedAt: string;

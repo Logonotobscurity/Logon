@@ -63,7 +63,6 @@ export class PostgresExecutionService {
         }
       }
 
-
       const status: ExecutionStatus = !decision.allowed
         ? "REJECTED"
         : decision.requiresApproval
@@ -126,28 +125,71 @@ export class PostgresExecutionService {
     });
   }
 
-  async decideApproval(
-    decision: ApprovalDecision
-  ): Promise<ApprovalDecision> {
+  async decideApproval(decision: ApprovalDecision): Promise<ApprovalDecision> {
     return this.store.withTransaction(async (client) => {
-      const status = await this.store.decideApproval(client, decision);
-      const approval = await this.store.getApproval(client, decision.executionId);
-      if (!approval) {
-        throw new Error("Approval not found for execution: " + decision.executionId);
+      const current = await this.store.lockExecution(client, decision.executionId);
+      if (current !== "APPROVAL") {
+        throw new Error(
+          "Cannot decide approval for execution not in APPROVAL: " +
+            decision.executionId +
+            " (status=" +
+            current +
+            ")"
+        );
       }
 
-      if (status === "APPROVED") {
+      const approvalStatus = await this.store.decideApproval(client, decision);
+      const nextStatus: ExecutionStatus =
+        approvalStatus === "APPROVED" ? "EXECUTION" : "REJECTED";
+
+      if (approvalStatus === "APPROVED" || approvalStatus === "REJECTED") {
+        assertTransition(current, nextStatus);
+      } else {
+        // EXPIRED is handled inside store.decideApproval by throwing
+        throw new Error("Unsupported approval decision status: " + approvalStatus);
+      }
+
+      const sequenceResult = await client.query(
+        "select coalesce(max(sequence), 0) as sequence from logon_execution_events where execution_id = $1",
+        [decision.executionId]
+      );
+      const sequence = Number(sequenceResult.rows[0].sequence) + 1;
+
+      await client.query(
+        "update logon_executions set status = $2, updated_at = now() where execution_id = $1",
+        [decision.executionId, nextStatus]
+      );
+
+      await this.store.appendEvent(
+        client,
+        {
+          executionId: decision.executionId,
+          status: nextStatus,
+          type: "EXECUTION_" + nextStatus,
+          timestamp: decision.decidedAt,
+          actorId: decision.decidedBy,
+          payload: {
+            approvalId: decision.approvalId,
+            approvalStatus,
+            reason: decision.reason ?? ("Approval " + approvalStatus.toLowerCase())
+          }
+        },
+        sequence
+      );
+
+      if (approvalStatus === "APPROVED") {
         await this.store.createDispatch(client, decision.executionId, "logon.execution");
       }
 
+      const tenantId = await this.lookupTenant(client, decision.executionId);
       await this.store.appendAudit(client, {
         auditId: randomUUID(),
         executionId: decision.executionId,
-        tenantId: approval ? await this.lookupTenant(client, decision.executionId) : "",
+        tenantId,
         action: "EXECUTION_APPROVAL_DECISION",
         actorId: decision.decidedBy,
-        allowed: status === "APPROVED",
-        reason: decision.reason ?? ("Approval " + status.toLowerCase()),
+        allowed: approvalStatus === "APPROVED",
+        reason: decision.reason ?? ("Approval " + approvalStatus.toLowerCase()),
         createdAt: decision.decidedAt
       });
 
