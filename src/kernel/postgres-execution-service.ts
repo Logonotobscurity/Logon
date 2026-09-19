@@ -159,7 +159,9 @@ export class PostgresExecutionService {
   }
 
   async decideApproval(decision: ApprovalDecision): Promise<ApprovalDecision> {
-    return this.store.withTransaction(async (client) => {
+    let expiredError: ApprovalExpiredError | undefined;
+
+    const result = await this.store.withTransaction(async (client) => {
       const current = await this.store.lockExecution(client, decision.executionId);
       if (current !== "APPROVAL") {
         throw new Error(
@@ -176,13 +178,17 @@ export class PostgresExecutionService {
         approvalStatus = await this.store.decideApproval(client, decision);
       } catch (error) {
         if (error instanceof ApprovalExpiredError) {
-          // Align execution with expired approval in the same transaction.
+          // The store has already marked the approval EXPIRED. Complete the
+          // execution rejection and let the transaction commit before surfacing
+          // the domain error to the caller.
           await this.rejectExpiredExecution(
             client,
             decision.executionId,
             decision.approvalId,
             "logon.approval.expiry"
           );
+          expiredError = error;
+          return undefined;
         }
         throw error;
       }
@@ -242,6 +248,14 @@ export class PostgresExecutionService {
 
       return decision;
     });
+
+    if (expiredError) {
+      throw expiredError;
+    }
+    if (!result) {
+      throw new Error("Approval decision produced no result");
+    }
+    return result;
   }
 
   /**
