@@ -15,9 +15,9 @@ export function redisConnectionFromEnv(
   return {
     host: url.hostname,
     port: Number(url.port || 6379),
-    username: url.username ? decodeURIComponent(url.username) : undefined,
-    password: url.password ? decodeURIComponent(url.password) : undefined,
-    db,
+    ...(url.username ? { username: decodeURIComponent(url.username) } : {}),
+    ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
+    ...(db > 0 ? { db } : {}),
     ...(url.protocol === "rediss:" ? { tls: {} } : {})
   };
 }
