@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Pool } from "pg";
+import { ApprovalExpiredError } from "../kernel/errors.js";
 import { PostgresExecutionService } from "../kernel/postgres-execution-service.js";
 
 const port = Number(process.env.LOGON_CONTROL_PLANE_API_PORT ?? 4100);
@@ -8,8 +9,6 @@ const pool = new Pool({
   connectionString: process.env.LOGON_DATABASE_URL ?? process.env.DATABASE_URL
 });
 const executionService = new PostgresExecutionService(pool);
-
-type TenantRequest = IncomingMessage & { tenantId?: string };
 
 function tenantId(req: IncomingMessage): string {
   const header = req.headers["x-logon-tenant-id"];
@@ -28,6 +27,7 @@ class HttpError extends Error {
     message: string
   ) {
     super(message);
+    this.name = "HttpError";
   }
 }
 
@@ -78,8 +78,7 @@ function executionIdFrom(pathname: string): string | undefined {
 async function listExecutions(tenant: string): Promise<unknown[]> {
   const result = await pool.query(
     "select e.execution_id, e.actor_id, e.agent_id, e.agent_version, e.objective, e.status, " +
-      "e.created_at, e.updated_at, " +
-      "coalesce(a.pending_count, 0) as pending_approvals " +
+      "e.created_at, e.updated_at, coalesce(a.pending_count, 0) as pending_approvals " +
       "from logon_executions e " +
       "left join lateral (" +
       "  select count(*) as pending_count from logon_approvals " +
@@ -112,7 +111,7 @@ async function getExecution(tenant: string, executionId: string): Promise<unknow
   const execution = executionResult.rows[0];
   if (!execution) throw new HttpError(404, "Execution not found");
 
-  const [events, approvals, evidence, audit, dispatch] = await Promise.all([
+  const [events, approvals, evidence, audit, dispatch, permissions] = await Promise.all([
     pool.query(
       "select sequence, status, event_type, actor_id, payload_json, created_at " +
         "from logon_execution_events where execution_id = $1 order by sequence asc limit 1000",
@@ -137,6 +136,12 @@ async function getExecution(tenant: string, executionId: string): Promise<unknow
       "select queue_name, status, attempts, locked_until, last_error, created_at, dispatched_at " +
         "from logon_execution_dispatches where execution_id = $1",
       [executionId]
+    ),
+    pool.query(
+      "select agent_id, tool_id, permission, allowed, expires_at " +
+        "from logon_tool_permissions where tenant_id = $1 and agent_id = $2 " +
+        "order by tool_id, permission",
+      [tenant, String(execution.agent_id)]
     )
   ]);
 
@@ -186,6 +191,13 @@ async function getExecution(tenant: string, executionId: string): Promise<unknow
       reason: String(row.reason),
       createdAt: new Date(row.created_at).toISOString()
     })),
+    permissions: permissions.rows.map((row) => ({
+      agentId: String(row.agent_id),
+      toolId: String(row.tool_id),
+      permission: String(row.permission),
+      allowed: Boolean(row.allowed),
+      ...(row.expires_at ? { expiresAt: new Date(row.expires_at).toISOString() } : {})
+    })),
     dispatch: dispatch.rows[0]
       ? {
           queueName: String(dispatch.rows[0].queue_name),
@@ -228,31 +240,30 @@ async function decideApproval(tenant: string, executionId: string, body: Record<
   } as const;
 
   try {
-    const result = await executionService.decideApproval(decision);
-    return result;
+    return await executionService.decideApproval(decision);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Approval decision failed";
-    const expired = error instanceof Error && error.name === "ApprovalExpiredError";
-    throw new HttpError(expired ? 409 : 422, message);
+    throw new HttpError(error instanceof ApprovalExpiredError ? 409 : 422, message);
   }
 }
 
-async function handler(req: TenantRequest, res: ServerResponse): Promise<void> {
+async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
-    if (req.method === "GET" && req.url === "/health") {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const pathname = url.pathname;
+
+    if (req.method === "GET" && pathname === "/health") {
       await pool.query("select 1");
       sendJson(res, 200, { ok: true, service: "logon-control-plane-api" });
       return;
     }
 
-    if (!req.url?.startsWith("/api/")) {
+    if (!pathname.startsWith("/api/")) {
       sendJson(res, 404, { error: "Not found" });
       return;
     }
 
     const tenant = tenantId(req);
-    const url = new URL(req.url, "http://localhost");
-    const pathname = url.pathname;
 
     if (req.method === "GET" && pathname === "/api/executions") {
       sendJson(res, 200, { executions: await listExecutions(tenant) });
