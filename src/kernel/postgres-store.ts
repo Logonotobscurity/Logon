@@ -8,9 +8,19 @@ export interface IdempotencyLookup {
   requestHash: string;
 }
 
+export interface DispatchClaim {
+  executionId: string;
+  queueName: string;
+  attempts: number;
+}
+
 export interface PostgresExecutionStore {
   withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T>;
   ensureTenant(client: DbClient, tenantId: string): Promise<void>;
+  createDispatch(client: DbClient, executionId: string, queueName: string): Promise<void>;
+  claimDispatches(client: DbClient, limit: number, leaseMs: number): Promise<DispatchClaim[]>;
+  markDispatchSucceeded(client: DbClient, executionId: string): Promise<void>;
+  markDispatchFailed(client: DbClient, executionId: string, error: string): Promise<void>;
   createExecution(client: DbClient, request: ExecutionRequest, status: ExecutionEvent["status"]): Promise<void>;
   appendEvent(
     client: DbClient,
@@ -65,6 +75,64 @@ export class PgExecutionStore implements PostgresExecutionStore {
     await client.query(
       "insert into logon_tenants (tenant_id) values ($1) on conflict (tenant_id) do nothing",
       [tenantId]
+    );
+  }
+
+  async createDispatch(client: DbClient, executionId: string, queueName: string): Promise<void> {
+    await client.query(
+      "insert into logon_execution_dispatches (execution_id, queue_name) values ($1, $2) " +
+        "on conflict (execution_id) do nothing",
+      [executionId, queueName]
+    );
+  }
+
+  async claimDispatches(
+    client: DbClient,
+    limit: number,
+    leaseMs: number
+  ): Promise<DispatchClaim[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const safeLease = Math.min(Math.max(leaseMs, 1000), 300000);
+    const result = await client.query(
+      "with candidates as (" +
+        " select execution_id from logon_execution_dispatches" +
+        " where status = 'PENDING' or (status = 'PROCESSING' and locked_until < now())" +
+        " order by created_at" +
+        " for update skip locked limit $1" +
+        ") " +
+        "update logon_execution_dispatches d" +
+        " set status = 'PROCESSING'," +
+        "     attempts = d.attempts + 1," +
+        "     locked_until = now() + ($2::double precision * interval '1 millisecond')," +
+        "     last_error = null" +
+        " from candidates c" +
+        " where d.execution_id = c.execution_id" +
+        " returning d.execution_id, d.queue_name, d.attempts",
+      [safeLimit, safeLease]
+    );
+
+    return result.rows.map((row) => ({
+      executionId: String(row.execution_id),
+      queueName: String(row.queue_name),
+      attempts: Number(row.attempts)
+    }));
+  }
+
+  async markDispatchSucceeded(client: DbClient, executionId: string): Promise<void> {
+    await client.query(
+      "update logon_execution_dispatches " +
+        "set status = 'DISPATCHED', locked_until = null, dispatched_at = now(), last_error = null " +
+        "where execution_id = $1",
+      [executionId]
+    );
+  }
+
+  async markDispatchFailed(client: DbClient, executionId: string, error: string): Promise<void> {
+    await client.query(
+      "update logon_execution_dispatches " +
+        "set status = 'PENDING', locked_until = null, last_error = $2 " +
+        "where execution_id = $1",
+      [executionId, error.slice(0, 2000)]
     );
   }
 
