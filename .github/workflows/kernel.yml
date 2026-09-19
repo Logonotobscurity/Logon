@@ -10,7 +10,33 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: logon
+          POSTGRES_PASSWORD: logon
+          POSTGRES_DB: logon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logon -d logon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LOGON_DATABASE_URL: postgres://logon:logon@localhost:5432/logon
+      LOGON_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,3 +55,5 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test -- --reporter=verbose
+      - name: Integration tests
+        run: npm run test:integration -- --reporter=verbose
