@@ -140,6 +140,19 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .approval-panel h3 { font-size: 22px; }
 .approval-panel p { margin: 7px 0 5px; color: #5e5b52; font-size: 13px; }
 .approval-actions { display: flex; gap: 8px; }
+.contract-panel { overflow: hidden; }
+.contract-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 15px 17px; border-bottom: 1px solid var(--line); }
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { padding: 6px 8px; border-radius: 8px; background: rgba(26,92,72,.09); color: var(--teal); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tag-dark { background: rgba(20,20,18,.07); color: #4f4e48; }
+.permission-table { padding: 0 17px 6px; }
+.permission-row { display: grid; grid-template-columns: 64px minmax(100px, .9fr) minmax(100px, 1fr) 85px; gap: 9px; align-items: center; padding: 10px 0; border-bottom: 1px dashed var(--line); font-size: 10px; }
+.permission-row span:last-child { color: var(--muted); font-size: 9px; }
+.perm-allowed, .perm-denied { font-weight: 900; letter-spacing: .04em; }
+.perm-allowed { color: var(--teal); }
+.perm-denied { color: var(--danger); }
+
+
 
 .two-col { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, .9fr); gap: 15px; }
 .timeline { padding: 16px 18px 18px; }
