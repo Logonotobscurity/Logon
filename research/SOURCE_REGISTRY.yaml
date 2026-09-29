@@ -1,0 +1,62 @@
+version: "1.0"
+updated: "2026-09-29"
+purpose: "Canonical registry for supplied research sources."
+verification_statuses:
+  - VERIFIED_PRIMARY
+  - USER_SUPPLIED_UNVERIFIED
+  - INACCESSIBLE
+  - REPOSITORY_STATE
+  - SELF_REPORTED
+
+source_groups:
+  company:
+    - {id: SRC-LOGON-WEB, url: "https://logonsolutions.netlify.app/", status: VERIFIED_PRIMARY, role: "public positioning and first-party portfolio claims"}
+    - {id: SRC-SUBSTACK-HOME, url: "https://logon.substack.com/", status: USER_SUPPLIED_UNVERIFIED, role: "LOG_ON research index"}
+    - {id: SRC-SUBSTACK-WHOS-INTELLIGENCE, url: "https://logon.substack.com/p/whose-intelligence-is-this", status: INACCESSIBLE, role: "cultural AI research source lead"}
+    - {id: SRC-SUBSTACK-NOTE, url: "https://substack.com/@logonthepage/note/c-241237463?r=6nty0", status: USER_SUPPLIED_UNVERIFIED, role: "research note source lead"}
+  github:
+    - {id: SRC-GH-LOGON, url: "https://github.com/Logonotobscurity/Logon", status: REPOSITORY_STATE, role: "LOG_ON OS source"}
+    - {id: SRC-GH-LOGON-PR1, url: "https://github.com/Logonotobscurity/Logon/pull/1", status: REPOSITORY_STATE, role: "merged kernel foundation"}
+    - {id: SRC-GH-PAL, url: "https://github.com/Logonotobscurity/pal", status: REPOSITORY_STATE, role: "PAL implementation"}
+    - {id: SRC-GH-PAL-BENCH, url: "https://github.com/Logonotobscurity/pal/blob/main/BENCHMARK_REPORT.md", status: REPOSITORY_STATE, role: "public benchmark status"}
+    - {id: SRC-GH-PAL-PR17, url: "https://github.com/Logonotobscurity/pal/pull/17", status: INACCESSIBLE, role: "supplied PR reference; unresolved"}
+    - {id: SRC-GH-WWHISPER, url: "https://github.com/Logonotobscurity/wwhisper", status: REPOSITORY_STATE, role: "PAL/DAPF implementation"}
+    - {id: SRC-GH-CLIP, url: "https://github.com/Logonotobscurity/clip-creator-studio.git", status: REPOSITORY_STATE, role: "CLIPIN architecture reference"}
+    - {id: SRC-GH-VIDEO-WIZARD, url: "https://github.com/el-frontend/video-wizard", status: REPOSITORY_STATE, role: "open-source video architecture reference"}
+  voice:
+    - {id: SRC-AA-VOICE, url: "https://www.assemblyai.com/docs/voice-agents/voice-agent-api", status: VERIFIED_PRIMARY, role: "Voice Agent API contract"}
+    - {id: SRC-AA-TURNS, url: "https://www.assemblyai.com/docs/voice-agents/voice-agent-api/turn-detection-and-interruptions", status: VERIFIED_PRIMARY, role: "turn detection"}
+    - {id: SRC-AA-EVENTS, url: "https://www.assemblyai.com/docs/voice-agents/voice-agent-api/events-reference", status: VERIFIED_PRIMARY, role: "event and tool call contract"}
+    - {id: SRC-AA-KEYS, url: "https://www.assemblyai.com/docs/faq/how-to-get-your-api-key", status: VERIFIED_PRIMARY, role: "credential boundary"}
+    - {id: SRC-AA-PRODUCT, url: "https://www.assemblyai.com/products/voice-agent-api", status: VERIFIED_PRIMARY, role: "current product claims; language count needs reconciliation"}
+    - {id: SRC-AA-LANG, url: "https://www.assemblyai.com/blog/voice-agent-api-supported-languages", status: VERIFIED_PRIMARY, role: "published language support statement"}
+    - {id: SRC-AA-BUILD, url: "https://www.assemblyai.com/blog/how-to-build-with-voice-agent-api", status: VERIFIED_PRIMARY, role: "implementation example"}
+    - {id: SRC-AA-ORDER, url: "https://www.assemblyai.com/blog/customer-support-voice-agent-order-lookup", status: VERIFIED_PRIMARY, role: "tool verification example"}
+    - {id: SRC-AA-CHANGELOG, url: "https://www.assemblyai.com/changelog", status: USER_SUPPLIED_UNVERIFIED, role: "freshness reference"}
+  research:
+    - {id: SRC-SAKANA-NAMAZU, url: "https://sakana.ai/namazu-api/", status: VERIFIED_PRIMARY, role: "specialized model API"}
+    - {id: SRC-ACL-INJONGO, url: "https://aclanthology.org/2025.acl-long.464/", status: VERIFIED_PRIMARY, role: "African intent/slot benchmark"}
+    - {id: SRC-ACL-CLARIFY, url: "https://aclanthology.org/2026.findings-acl.2028/", status: VERIFIED_PRIMARY, role: "structured uncertainty for tool calling"}
+    - {id: SRC-TIIS, url: "https://doi.org/10.1145/3773292", status: VERIFIED_PRIMARY, role: "human-AI collaborative design evaluation"}
+  governance:
+    - {id: SRC-NIST, url: "https://www.nist.gov/itl/ai-risk-management-framework", status: VERIFIED_PRIMARY, role: "AI risk management baseline"}
+    - {id: SRC-OWASP, url: "https://genai.owasp.org/", status: USER_SUPPLIED_UNVERIFIED, role: "agentic security reference"}
+    - {id: SRC-MCP, url: "https://blog.modelcontextprotocol.io/posts/2026-07-28/", status: VERIFIED_PRIMARY, role: "current MCP specification changes"}
+  infrastructure:
+    - {id: SRC-SUPABASE, url: "https://supabase.com/docs/guides/getting-started/api-keys", status: VERIFIED_PRIMARY, role: "key/security model"}
+    - {id: SRC-OPENROUTER, url: "https://openrouter.ai/", status: VERIFIED_PRIMARY, role: "multi-provider gateway"}
+    - {id: SRC-OPENROUTER-PRIVACY, url: "https://openrouter.ai/privacy/", status: VERIFIED_PRIMARY, role: "provider data policies"}
+  african_ai:
+    - {id: SRC-SAHARA, url: "https://www.intron.io/sahara-v2/", status: VERIFIED_PRIMARY, role: "African speech model"}
+    - {id: SRC-NATLAS, url: "https://huggingface.co/NCAIR1/N-ATLaS", status: VERIFIED_PRIMARY, role: "Nigerian multilingual model card"}
+    - {id: SRC-MARABA, url: "https://maraba.ai/", status: SELF_REPORTED, role: "Nigerian multilingual voice reference"}
+    - {id: SRC-AWARRI, url: "https://www.awarri.com/", status: SELF_REPORTED, role: "Nigerian multilingual AI ecosystem"}
+    - {id: SRC-MYMANSA, url: "https://www.mymansa.ai/", status: SELF_REPORTED, role: "African-language agent reference"}
+    - {id: SRC-ADDISAI, url: "https://www.addisai.ch/", status: SELF_REPORTED, role: "African enterprise AI reference"}
+    - {id: SRC-MUTUMWA, url: "https://mutumwa.afrainity.com/", status: SELF_REPORTED, role: "African-language AI reference"}
+    - {id: SRC-ATLAS-AFRICA, url: "https://atlasforafrica.com/", status: SELF_REPORTED, role: "African language/data ecosystem"}
+  reference_media:
+    - {id: SRC-ECOLEBOOKS, url: "https://ecolebooks.com/", status: USER_SUPPLIED_UNVERIFIED, role: "potential educational corpus; licensing required"}
+    - {id: SRC-NOTJUSTOK, url: "https://notjustok.com/lyrics/ayomide-lyrics-by-indriza/", status: USER_SUPPLIED_UNVERIFIED, role: "cultural media context"}
+    - {id: SRC-SHAZAM, url: "https://www.shazam.com/", status: USER_SUPPLIED_UNVERIFIED, role: "music reference"}
+    - {id: SRC-YOUTUBE, url: "https://www.youtube.com/watch?v=_sRdzy-WGeI", status: USER_SUPPLIED_UNVERIFIED, role: "media artifact; capture provenance before research use"}
